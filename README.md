@@ -20,11 +20,14 @@ Copy collatgraph.go file from github into new go file in your directory that you
 
 # Step 4: Go Get Command and Imports
 
-Run command : Go Get github.com/hajimehoshi/ebiten/v2
+
 
 These are all the imports you'll need
 
-** "github.com/hajimehoshi/ebiten/v2" "github.com/hajimehoshi/ebiten/v2/vector" "github.com/hajimehoshi/ebiten/v2/inpututil" "golang.org/x/image/font" "golang.org/x/image/font/opentype" "golang.org/x/image/font/gofont/goregular" "github.com/hajimehoshi/ebiten/v2/text"**
+"github.com/hajimehoshi/ebiten/v2" "github.com/hajimehoshi/ebiten/v2/vector" "github.com/hajimehoshi/ebiten/v2/inpututil" "golang.org/x/image/font" "golang.org/x/image/font/opentype" "golang.org/x/image/font/gofont/goregular" "github.com/hajimehoshi/ebiten/v2/text"
+
+
+
 # Step 5 : Build and Cleanup
 Run command : Go mod tidy
 
