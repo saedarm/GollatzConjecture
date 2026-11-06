@@ -16,6 +16,17 @@ func TestSequence27(t *testing.T) {
 	}
 }
 
+func TestPathLimitFitsInInt(t *testing.T) {
+	// 1,410,123,943 has the highest peak of any start allowed in the Path
+	// view. The next record, 8,528,817,511, goes past the largest int.
+	if peak := slices.Max(Sequence(1_410_123_943)); peak != 7_125_885_122_794_452_160 {
+		t.Fatalf("1,410,123,943 peaked at %d", peak)
+	}
+	if maxPathStart >= 8_528_817_511 {
+		t.Fatalf("maxPathStart %d allows paths that overflow", maxPathStart)
+	}
+}
+
 func TestStoppingTimesMatchSequence(t *testing.T) {
 	steps := StoppingTimes(5000)
 	for n := 1; n <= 5000; n++ {

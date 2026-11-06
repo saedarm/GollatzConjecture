@@ -34,7 +34,7 @@ const (
 	plotW = screenW - plotX - 40
 	plotH = screenH - plotY - 60
 
-	maxPathStart   = 1_000_000_000_000
+	maxPathStart   = 8_000_000_000 // 8,528,817,511 is the first path to overflow an int
 	maxHistogramN  = 5_000_000
 	maxSpectrogram = 500_000 // about a minute of static
 	maxMusic       = 1_000   // about three minutes of music
@@ -97,6 +97,7 @@ type Game struct {
 
 	// Spectrogram view
 	specN     int
+	specMusic bool // whether the current picture and player are music or static
 	specImg   *ebiten.Image
 	specMaxHz int
 	duration  time.Duration
@@ -270,6 +271,7 @@ func (g *Game) apply(m mode) {
 
 	case modeSpectrogram:
 		g.specN = n
+		g.specMusic = g.music
 		steps := StoppingTimes(n)
 		if g.music {
 			// One note per number. The spectrogram is worked out from a
@@ -279,8 +281,9 @@ func (g *Game) apply(m mode) {
 			sig := Render(notes, signalRate)
 			g.specMaxHz = 2000
 			g.specImg = ebiten.NewImageFromImage(SpectrogramImage(Spectrogram(sig), g.specMaxHz*fftSize/signalRate+1))
-			g.duration = time.Duration(len(sig)) * time.Second / signalRate
-			g.player = g.newPlayer(g.player, Render(notes, playbackRate), playbackRate)
+			audible := Render(notes, playbackRate)
+			g.duration = time.Duration(len(audible)) * time.Second / playbackRate
+			g.player = g.newPlayer(g.player, audible, playbackRate)
 		} else {
 			// The raw step counts, straight in as a sound wave.
 			sig := Signal(steps)
@@ -345,10 +348,10 @@ func (g *Game) drawInput(screen *ebiten.Image) {
 		cursor = "|"
 	}
 	drawText(screen, g.inputs[slot]+cursor, float64(boxX)+8, 62, white, face)
-	drawText(screen, "press Enter", float64(boxX)+172, 64, muted, small)
-
 	if g.errMsg != "" {
-		drawText(screen, g.errMsg, 20, 92, red, small)
+		drawText(screen, g.errMsg, float64(boxX)+172, 64, red, small)
+	} else {
+		drawText(screen, "press Enter", float64(boxX)+172, 64, muted, small)
 	}
 }
 
@@ -394,7 +397,7 @@ func (g *Game) drawPath(screen *ebiten.Image) {
 			for _, side := range []float64{-math.Pi / 6, math.Pi / 6} {
 				vector.StrokeLine(screen, b.x, b.y,
 					b.x-6*float32(math.Cos(angle+side)), b.y-6*float32(math.Sin(angle+side)),
-					1.5, red, true)
+					1.5, lineClr, true)
 			}
 		}
 	}
@@ -457,7 +460,7 @@ func (g *Game) drawSpectrogram(screen *ebiten.Image) {
 	}
 	desc := fmt.Sprintf("1 to %s as music, one note per number (%s).   Space: play/pause   R: restart   M: hear it as raw static",
 		commas(g.specN), g.duration.Round(time.Second))
-	if !g.music {
+	if !g.specMusic {
 		desc = fmt.Sprintf("1 to %s as raw sound, %d per second (%s).   Space: play/pause   R: restart   M: hear it as music",
 			commas(g.specN), signalRate, g.duration.Round(time.Second))
 	}
