@@ -1,10 +1,28 @@
 # Gollatz Conjecture
 
-A Collatz conjecture visualizer in Go and [Ebitengine](https://ebitengine.org/), with three views:
+A Collatz conjecture visualizer in Go and [Ebitengine](https://ebitengine.org/). It graphs the path a number takes down to 1, counts how long every number takes, and then turns those counts into sound you can see and hear.
 
-- **Path**: type a starting number and watch the path it takes down to 1. Short paths get arrows and a label on every step. Long ones get a plain line with the start and peak marked.
-- **Histogram**: counts how many steps every number from 1 to N takes to reach 1, and shows how many numbers land on each step count. Hover over a bar to see its count.
-- **Spectrogram**: treats the step counts for 1 to N as a sound wave, at 8,000 numbers per second. It runs that wave through an FFT (fast Fourier transform) to draw a spectrogram, and lets you listen to it. Press Space to play or pause, and R to restart.
+![The path 27 takes to reach 1](screenshots/path-27.png)
+
+## The three views
+
+### Path
+
+Type a starting number and watch the path it takes down to 1. Short paths get an arrow and a label on every step. Long ones, like 27's 111 steps, get a plain line with the start and the peak marked.
+
+![The path 7 takes to reach 1, with every step labeled](screenshots/path-7.png)
+
+### Histogram
+
+Counts how many steps every number from 1 to N takes to reach 1, then shows how many numbers land on each step count. Hover over a bar to see its count.
+
+![Histogram of step counts for 1 to 10,000](screenshots/histogram.png)
+
+### Spectrogram
+
+Treats the step counts for 1 to N as a sound wave, at 8,000 numbers per second. It runs that wave through an FFT (fast Fourier transform) to draw a spectrogram, and lets you listen to it. Press Space to play or pause, and R to restart. A white line tracks where you are in the sound.
+
+![Spectrogram of the step counts for 1 to 200,000, played as sound](screenshots/spectrogram.png)
 
 ## The Collatz rules
 
@@ -59,3 +77,8 @@ go test ./...
 - `collatz.go`: the Collatz math
 - `spectrum.go`: FFT spectrogram and audio
 - `collatz_test.go`: tests
+- `screenshots/`: the images in this README
+
+## License
+
+MIT. See [LICENSE](LICENSE).
