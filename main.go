@@ -1,8 +1,10 @@
 // Gollatz Conjecture: three views of the Collatz conjecture.
 //
-//   - Path:        the numbers one starting value visits on its way to 1.
+//   - Path:        the numbers one starting value visits on its way to 1,
+//     which you can also play as a melody.
 //   - Histogram:   how many steps every number from 1 to N takes.
-//   - Spectrogram: those step counts played as sound and run through an FFT.
+//   - Spectrogram: those step counts played as music (or raw static) and
+//     run through an FFT.
 package main
 
 import (
@@ -34,7 +36,8 @@ const (
 
 	maxPathStart   = 1_000_000_000_000
 	maxHistogramN  = 5_000_000
-	maxSpectrogram = 500_000 // about a minute of sound
+	maxSpectrogram = 500_000 // about a minute of static
+	maxMusic       = 1_000   // about three minutes of music
 )
 
 type mode int
@@ -51,6 +54,7 @@ var (
 		"Starting number:",
 		"Count every number from 1 to:",
 		"Play every number from 1 to:",
+		"Play every number from 1 to:",
 	}
 
 	bg     = color.RGBA{18, 18, 24, 255}
@@ -65,13 +69,25 @@ var (
 	small *text.GoTextFace
 )
 
+// Input boxes. The Spectrogram view keeps separate numbers for static and
+// music, since a good length for one is far too long for the other.
+const (
+	slotPath = iota
+	slotHistogram
+	slotStatic
+	slotMusic
+)
+
 type Game struct {
 	mode   mode
-	inputs [3]string
+	music  bool // Spectrogram view: music (true) or raw static (false)
+	inputs [4]string
 	errMsg string
 
 	// Path view
-	sequence []int
+	sequence   []int
+	pathPlayer *audio.Player
+	pathDur    time.Duration
 
 	// Histogram view
 	histN      int
@@ -80,16 +96,18 @@ type Game struct {
 	longestLen int
 
 	// Spectrogram view
-	specN    int
-	specImg  *ebiten.Image
-	duration time.Duration
-	player   *audio.Player
-	audioCtx *audio.Context
+	specN     int
+	specImg   *ebiten.Image
+	specMaxHz int
+	duration  time.Duration
+	player    *audio.Player
+	audioCtx  *audio.Context
 }
 
 func newGame() *Game {
 	g := &Game{
-		inputs: [3]string{"27", "10000", "200000"},
+		music:  true,
+		inputs: [4]string{"27", "10000", "200000", "240"},
 	}
 	g.apply(modePath)
 	g.apply(modeHistogram)
@@ -111,36 +129,93 @@ func (g *Game) Update() error {
 		}
 	}
 
+	slot := g.slot(g.mode)
 	for _, r := range ebiten.AppendInputChars(nil) {
-		if r >= '0' && r <= '9' && len(g.inputs[g.mode]) < 13 {
-			g.inputs[g.mode] += string(r)
+		if r >= '0' && r <= '9' && len(g.inputs[slot]) < 13 {
+			g.inputs[slot] += string(r)
 		}
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) && len(g.inputs[g.mode]) > 0 {
-		in := g.inputs[g.mode]
-		g.inputs[g.mode] = in[:len(in)-1]
+	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) && len(g.inputs[slot]) > 0 {
+		g.inputs[slot] = g.inputs[slot][:len(g.inputs[slot])-1]
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyNumpadEnter) {
 		g.apply(g.mode)
 	}
 
-	if g.mode == modeSpectrogram && g.player != nil {
+	switch g.mode {
+	case modePath:
 		if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
-			if g.player.IsPlaying() {
-				g.player.Pause()
-			} else {
-				if g.player.Position() >= g.duration {
-					_ = g.player.Rewind()
-				}
-				g.player.Play()
+			if g.pathPlayer == nil && len(g.sequence) > 0 {
+				g.buildPathMelody()
 			}
+			togglePlay(g.pathPlayer, g.pathDur)
 		}
-		if inpututil.IsKeyJustPressed(ebiten.KeyR) {
+		if inpututil.IsKeyJustPressed(ebiten.KeyR) && g.pathPlayer != nil {
+			_ = g.pathPlayer.Rewind()
+			g.pathPlayer.Play()
+		}
+	case modeSpectrogram:
+		if inpututil.IsKeyJustPressed(ebiten.KeyM) {
+			g.music = !g.music
+			g.apply(modeSpectrogram)
+		}
+		if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
+			togglePlay(g.player, g.duration)
+		}
+		if inpututil.IsKeyJustPressed(ebiten.KeyR) && g.player != nil {
 			_ = g.player.Rewind()
 			g.player.Play()
 		}
 	}
 	return nil
+}
+
+// slot says which input box a view is using right now.
+func (g *Game) slot(m mode) int {
+	switch {
+	case m == modePath:
+		return slotPath
+	case m == modeHistogram:
+		return slotHistogram
+	case g.music:
+		return slotMusic
+	default:
+		return slotStatic
+	}
+}
+
+func togglePlay(p *audio.Player, dur time.Duration) {
+	if p == nil {
+		return
+	}
+	if p.IsPlaying() {
+		p.Pause()
+		return
+	}
+	if p.Position() >= dur {
+		_ = p.Rewind()
+	}
+	p.Play()
+}
+
+// newPlayer swaps out an old player for a new one built from samples at rate.
+// The sound card is only opened the first time something is played, so the
+// app still works on a machine with no audio device.
+func (g *Game) newPlayer(old *audio.Player, samples []float64, rate int) *audio.Player {
+	if g.audioCtx == nil {
+		g.audioCtx = audio.NewContext(playbackRate)
+	}
+	if old != nil {
+		old.Pause()
+		_ = old.Close()
+	}
+	return g.audioCtx.NewPlayerF32FromBytes(AudioBytes(samples, rate))
+}
+
+func (g *Game) buildPathMelody() {
+	samples := Render(Melody(g.sequence, true), playbackRate)
+	g.pathDur = time.Duration(len(samples)) * time.Second / playbackRate
+	g.pathPlayer = g.newPlayer(g.pathPlayer, samples, playbackRate)
 }
 
 func (g *Game) switchTo(m mode) {
@@ -152,26 +227,35 @@ func (g *Game) switchTo(m mode) {
 	if m != modeSpectrogram && g.player != nil {
 		g.player.Pause()
 	}
+	if m != modePath && g.pathPlayer != nil {
+		g.pathPlayer.Pause()
+	}
 }
 
 // apply reads the input box for a view and recalculates that view.
 func (g *Game) apply(m mode) {
 	g.errMsg = ""
-	n, err := strconv.Atoi(g.inputs[m])
-	limits := []int{maxPathStart, maxHistogramN, maxSpectrogram}
-	minimums := []int{1, 2, fftSize + 1}
+	slot := g.slot(m)
+	n, err := strconv.Atoi(g.inputs[slot])
+	limits := []int{maxPathStart, maxHistogramN, maxSpectrogram, maxMusic}
+	minimums := []int{1, 2, fftSize + 1, 8}
 	switch {
-	case err != nil || n < minimums[m]:
-		g.errMsg = fmt.Sprintf("Enter a whole number of at least %s.", commas(minimums[m]))
+	case err != nil || n < minimums[slot]:
+		g.errMsg = fmt.Sprintf("Enter a whole number of at least %s.", commas(minimums[slot]))
 		return
-	case n > limits[m]:
-		g.errMsg = fmt.Sprintf("Keep it at or under %s.", commas(limits[m]))
+	case n > limits[slot]:
+		g.errMsg = fmt.Sprintf("Keep it at or under %s.", commas(limits[slot]))
 		return
 	}
 
 	switch m {
 	case modePath:
 		g.sequence = Sequence(n)
+		if g.pathPlayer != nil {
+			g.pathPlayer.Pause()
+			_ = g.pathPlayer.Close()
+			g.pathPlayer = nil // rebuilt the next time you press Space
+		}
 
 	case modeHistogram:
 		steps := StoppingTimes(n)
@@ -185,20 +269,26 @@ func (g *Game) apply(m mode) {
 		g.longestN = slices.Index(steps, longest) // first number with the most steps
 
 	case modeSpectrogram:
-		sig := Signal(StoppingTimes(n))
 		g.specN = n
-		g.specImg = ebiten.NewImageFromImage(SpectrogramImage(Spectrogram(sig)))
-		g.duration = time.Duration(len(sig)) * time.Second / signalRate
-		// The sound card is only opened once you visit this view, so the
-		// other two views work fine on a machine with no audio device.
-		if g.audioCtx == nil {
-			g.audioCtx = audio.NewContext(playbackRate)
+		steps := StoppingTimes(n)
+		if g.music {
+			// One note per number. The spectrogram is worked out from a
+			// low-quality copy of the music, and zoomed in to 0-2,000 Hz where
+			// the notes are. You hear a full-quality copy.
+			notes := Melody(steps[1:], false)
+			sig := Render(notes, signalRate)
+			g.specMaxHz = 2000
+			g.specImg = ebiten.NewImageFromImage(SpectrogramImage(Spectrogram(sig), g.specMaxHz*fftSize/signalRate+1))
+			g.duration = time.Duration(len(sig)) * time.Second / signalRate
+			g.player = g.newPlayer(g.player, Render(notes, playbackRate), playbackRate)
+		} else {
+			// The raw step counts, straight in as a sound wave.
+			sig := Signal(steps)
+			g.specMaxHz = signalRate / 2
+			g.specImg = ebiten.NewImageFromImage(SpectrogramImage(Spectrogram(sig), fftSize/2+1))
+			g.duration = time.Duration(len(sig)) * time.Second / signalRate
+			g.player = g.newPlayer(g.player, sig, signalRate)
 		}
-		if g.player != nil {
-			g.player.Pause()
-			_ = g.player.Close()
-		}
-		g.player = g.audioCtx.NewPlayerF32FromBytes(AudioBytes(sig))
 	}
 }
 
@@ -244,7 +334,8 @@ func (g *Game) drawTabs(screen *ebiten.Image) {
 }
 
 func (g *Game) drawInput(screen *ebiten.Image) {
-	prompt := modePrompts[g.mode]
+	slot := g.slot(g.mode)
+	prompt := modePrompts[slot]
 	drawText(screen, prompt, 20, 62, white, face)
 	pw, _ := text.Measure(prompt, face, 0)
 	boxX := 30 + float32(pw)
@@ -253,7 +344,7 @@ func (g *Game) drawInput(screen *ebiten.Image) {
 	if (time.Now().UnixMilli()/500)%2 == 0 {
 		cursor = "|"
 	}
-	drawText(screen, g.inputs[g.mode]+cursor, float64(boxX)+8, 62, white, face)
+	drawText(screen, g.inputs[slot]+cursor, float64(boxX)+8, 62, white, face)
 	drawText(screen, "press Enter", float64(boxX)+172, 64, muted, small)
 
 	if g.errMsg != "" {
@@ -267,8 +358,14 @@ func (g *Game) drawPath(screen *ebiten.Image) {
 		return
 	}
 	peak := slices.Max(seq)
-	drawText(screen, fmt.Sprintf("Starting at %s: %d steps to reach 1, peaking at %s",
+	drawText(screen, fmt.Sprintf("Starting at %s: %d steps to reach 1, peaking at %s.   Space: play it as a melody   R: restart",
 		commas(seq[0]), len(seq)-1, commas(peak)), 20, 92, accent, face)
+
+	// While the melody plays, the steps already heard turn orange.
+	playing := -1
+	if g.pathPlayer != nil && (g.pathPlayer.IsPlaying() || g.pathPlayer.Position() > 0) {
+		playing = min(int(g.pathPlayer.Position().Seconds()*notesPerSecond), len(seq)-1)
+	}
 	drawAxes(screen)
 
 	type pt struct{ x, y float32 }
@@ -287,7 +384,11 @@ func (g *Game) drawPath(screen *ebiten.Image) {
 	detailed := len(seq) <= 60
 	for i := 0; i < len(pts)-1; i++ {
 		a, b := pts[i], pts[i+1]
-		vector.StrokeLine(screen, a.x, a.y, b.x, b.y, 1.5, red, true)
+		lineClr := red
+		if i < playing {
+			lineClr = accent
+		}
+		vector.StrokeLine(screen, a.x, a.y, b.x, b.y, 1.5, lineClr, true)
 		if detailed {
 			angle := math.Atan2(float64(b.y-a.y), float64(b.x-a.x))
 			for _, side := range []float64{-math.Pi / 6, math.Pi / 6} {
@@ -302,6 +403,11 @@ func (g *Game) drawPath(screen *ebiten.Image) {
 			vector.FillCircle(screen, p.x, p.y, 3, blue, true)
 			drawText(screen, commas(seq[i]), float64(p.x)+5, float64(p.y)-16, white, small)
 		}
+	}
+	if playing >= 0 {
+		p := pts[playing]
+		vector.FillCircle(screen, p.x, p.y, 7, accent, true)
+		drawText(screen, commas(seq[playing]), float64(p.x)+10, float64(p.y)-26, white, face)
 	}
 	drawText(screen, "step →", plotX+plotW-50, plotY+plotH+10, muted, small)
 }
@@ -349,8 +455,13 @@ func (g *Game) drawSpectrogram(screen *ebiten.Image) {
 	if g.specImg == nil {
 		return
 	}
-	drawText(screen, fmt.Sprintf("1 to %s as sound, %d per second (%s long). Space: play/pause   R: restart",
-		commas(g.specN), signalRate, g.duration.Round(time.Second)), 20, 92, accent, face)
+	desc := fmt.Sprintf("1 to %s as music, one note per number (%s).   Space: play/pause   R: restart   M: hear it as raw static",
+		commas(g.specN), g.duration.Round(time.Second))
+	if !g.music {
+		desc = fmt.Sprintf("1 to %s as raw sound, %d per second (%s).   Space: play/pause   R: restart   M: hear it as music",
+			commas(g.specN), signalRate, g.duration.Round(time.Second))
+	}
+	drawText(screen, desc, 20, 92, accent, face)
 
 	b := g.specImg.Bounds()
 	op := &ebiten.DrawImageOptions{Filter: ebiten.FilterLinear}
@@ -359,9 +470,13 @@ func (g *Game) drawSpectrogram(screen *ebiten.Image) {
 	screen.DrawImage(g.specImg, op)
 
 	// Frequency labels on the left, seconds along the bottom.
-	nyquist := signalRate / 2
-	for hz := 0; hz <= nyquist; hz += 1000 {
-		y := float64(plotY+plotH) - float64(hz)/float64(nyquist)*plotH
+	top := g.specMaxHz
+	every := 1000
+	if top <= 2000 {
+		every = 250
+	}
+	for hz := 0; hz <= top; hz += every {
+		y := float64(plotY+plotH) - float64(hz)/float64(top)*plotH
 		drawText(screen, fmt.Sprintf("%d Hz", hz), 10, y-8, muted, small)
 	}
 	secs := g.duration.Seconds()

@@ -79,12 +79,17 @@ func Spectrogram(sig []float64) [][]float64 {
 }
 
 // SpectrogramImage draws the spectrogram as a picture: time runs left to
-// right, frequency runs bottom to top, and brighter means louder.
-func SpectrogramImage(rows [][]float64) *image.RGBA {
+// right, frequency runs bottom to top, and brighter means louder. Only the
+// first `buckets` frequency buckets are drawn, so a picture of music can zoom
+// in on the range where the notes are.
+func SpectrogramImage(rows [][]float64, buckets int) *image.RGBA {
 	if len(rows) == 0 {
 		return image.NewRGBA(image.Rect(0, 0, 1, 1))
 	}
-	w, h := len(rows), len(rows[0])
+	w, h := len(rows), min(buckets, len(rows[0]))
+	for i := range rows {
+		rows[i] = rows[i][:h]
+	}
 
 	loudest := math.Inf(-1)
 	for _, row := range rows {
@@ -124,10 +129,11 @@ func heat(t float64) color.RGBA {
 	return color.RGBA{mix(a.R, b.R), mix(a.G, b.G), mix(a.B, b.B), 255}
 }
 
-// AudioBytes packs the signal in the format Ebiten's audio player expects:
-// 32-bit float, little endian, two channels, at playbackRate.
-func AudioBytes(sig []float64) []byte {
-	const repeat = playbackRate / signalRate
+// AudioBytes packs a signal recorded at rate (which must divide playbackRate)
+// in the format Ebiten's audio player expects: 32-bit float, little endian,
+// two channels, at playbackRate.
+func AudioBytes(sig []float64, rate int) []byte {
+	repeat := playbackRate / rate
 	const volume = 0.4
 	out := make([]byte, 0, len(sig)*repeat*2*4)
 	var buf [4]byte
