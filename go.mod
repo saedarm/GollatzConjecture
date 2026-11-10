@@ -3,6 +3,7 @@ module github.com/saedarm/gollatzconjecture
 go 1.27.3
 
 require (
+	github.com/braheezy/shine-mp3 v0.2.0
 	github.com/hajimehoshi/ebiten/v2 v2.10.5
 	golang.org/x/image v0.47.0
 	gonum.org/v1/gonum v0.17.0

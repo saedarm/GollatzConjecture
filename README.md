@@ -36,6 +36,18 @@ Press M to switch to raw static. This feeds the step counts straight in as a sou
 
 Pick a whole number. If it's even, halve it. If it's odd, multiply by 3 and add 1. Repeat. The conjecture says you always reach 1. Nobody has proven it.
 
+## Saving songs
+
+Every song the app makes is saved as an MP3 automatically, with nothing to press. The files go in an `mp3` folder inside whatever folder you started the app from: next to `gollatz.exe` if you double-click it, or the project folder if you use `go run .`. A message at the bottom of the window shows the full path once each one is written.
+
+| What you did | File it saves |
+| --- | --- |
+| Entered a starting number in Path | `mp3/path-27.mp3` |
+| Played 1 to N as music in Spectrogram | `mp3/music-1-to-240.mp3` |
+| Played 1 to N as static in Spectrogram | `mp3/static-1-to-200000.mp3` |
+
+The same number always makes the same song, so if the file is already there it isn't saved again. The encoding runs in the background, so the app doesn't pause while it works. The `mp3` folder is in `.gitignore` so your songs don't end up in the repo.
+
 ## Running it
 
 1. Install Go 1.27 or newer from https://go.dev/dl/
@@ -86,6 +98,7 @@ go test ./...
 - `main.go`: window, input, and drawing
 - `collatz.go`: the Collatz math
 - `music.go`: turning numbers into notes and notes into sound
+- `mp3.go`: saving songs to the `mp3` folder
 - `spectrum.go`: FFT spectrogram and audio output
 - `collatz_test.go`: tests
 - `screenshots/`: the images in this README

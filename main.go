@@ -5,6 +5,8 @@
 //   - Histogram:   how many steps every number from 1 to N takes.
 //   - Spectrogram: those step counts played as music (or raw static) and
 //     run through an FFT.
+//
+// Every song it makes is saved automatically to the mp3 folder.
 package main
 
 import (
@@ -84,10 +86,17 @@ type Game struct {
 	inputs [4]string
 	errMsg string
 
+	// MP3 auto-save: finished saves report back here, and the latest message
+	// shows at the bottom of the window for a few seconds.
+	saved    chan string
+	status   string
+	statusAt time.Time
+
 	// Path view
-	sequence   []int
-	pathPlayer *audio.Player
-	pathDur    time.Duration
+	sequence    []int
+	pathSamples []float64
+	pathPlayer  *audio.Player
+	pathDur     time.Duration
 
 	// Histogram view
 	histN      int
@@ -109,6 +118,7 @@ func newGame() *Game {
 	g := &Game{
 		music:  true,
 		inputs: [4]string{"27", "10000", "200000", "240"},
+		saved:  make(chan string, 16),
 	}
 	g.apply(modePath)
 	g.apply(modeHistogram)
@@ -118,6 +128,15 @@ func newGame() *Game {
 // ---------------------------------------------------------------- input
 
 func (g *Game) Update() error {
+	for done := false; !done; {
+		select {
+		case msg := <-g.saved:
+			g.status, g.statusAt = msg, time.Now()
+		default:
+			done = true
+		}
+	}
+
 	if inpututil.IsKeyJustPressed(ebiten.KeyTab) {
 		g.switchTo((g.mode + 1) % 3)
 	}
@@ -214,9 +233,8 @@ func (g *Game) newPlayer(old *audio.Player, samples []float64, rate int) *audio.
 }
 
 func (g *Game) buildPathMelody() {
-	samples := Render(Melody(g.sequence, true), playbackRate)
-	g.pathDur = time.Duration(len(samples)) * time.Second / playbackRate
-	g.pathPlayer = g.newPlayer(g.pathPlayer, samples, playbackRate)
+	g.pathDur = time.Duration(len(g.pathSamples)) * time.Second / playbackRate
+	g.pathPlayer = g.newPlayer(g.pathPlayer, g.pathSamples, playbackRate)
 }
 
 func (g *Game) switchTo(m mode) {
@@ -252,6 +270,8 @@ func (g *Game) apply(m mode) {
 	switch m {
 	case modePath:
 		g.sequence = Sequence(n)
+		g.pathSamples = Render(Melody(g.sequence, true), playbackRate)
+		autoSave(fmt.Sprintf("path-%d", n), g.pathSamples, playbackRate, g.saved)
 		if g.pathPlayer != nil {
 			g.pathPlayer.Pause()
 			_ = g.pathPlayer.Close()
@@ -284,6 +304,7 @@ func (g *Game) apply(m mode) {
 			audible := Render(notes, playbackRate)
 			g.duration = time.Duration(len(audible)) * time.Second / playbackRate
 			g.player = g.newPlayer(g.player, audible, playbackRate)
+			autoSave(fmt.Sprintf("music-1-to-%d", n), audible, playbackRate, g.saved)
 		} else {
 			// The raw step counts, straight in as a sound wave.
 			sig := Signal(steps)
@@ -291,6 +312,7 @@ func (g *Game) apply(m mode) {
 			g.specImg = ebiten.NewImageFromImage(SpectrogramImage(Spectrogram(sig), fftSize/2+1))
 			g.duration = time.Duration(len(sig)) * time.Second / signalRate
 			g.player = g.newPlayer(g.player, sig, signalRate)
+			autoSave(fmt.Sprintf("static-1-to-%d", n), sig, signalRate, g.saved)
 		}
 	}
 }
@@ -309,6 +331,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		g.drawHistogram(screen)
 	case modeSpectrogram:
 		g.drawSpectrogram(screen)
+	}
+
+	if g.status != "" && time.Since(g.statusAt) < 6*time.Second {
+		drawText(screen, g.status, 20, screenH-22, muted, small)
 	}
 }
 

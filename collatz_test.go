@@ -2,6 +2,8 @@ package main
 
 import (
 	"math"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 )
@@ -100,5 +102,43 @@ func TestRenderLength(t *testing.T) {
 	wantSecs := 8/notesPerSecond + 1/notesPerSecond // last note rings for two beats
 	if got := float64(len(samples)) / signalRate; math.Abs(got-wantSecs) > 0.01 {
 		t.Fatalf("rendered %.3fs, want %.3fs", got, wantSecs)
+	}
+}
+
+func TestSaveMP3(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mp3", "path-27.mp3")
+	samples := Render(Melody(Sequence(27), true), playbackRate)
+	if err := SaveMP3(path, samples, playbackRate); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every MP3 frame starts with 11 set bits: 0xFF then 0xE0 or higher.
+	if len(data) < 1000 || data[0] != 0xFF || data[1]&0xE0 != 0xE0 {
+		t.Fatalf("doesn't look like an MP3 (%d bytes, starts % x)", len(data), data[:min(4, len(data))])
+	}
+	if _, err := os.Stat(path + ".part"); err == nil {
+		t.Fatal("left a .part file behind")
+	}
+
+	// Every frame should start with a valid header. A broken encoder can
+	// get the first one right and garble the rest, so walk all of them.
+	// MPEG-1 Layer III frame length: 144 * bitrate / sample rate (+1 if padded).
+	bitrates := []int{0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320}
+	rates := []int{44100, 48000, 32000}
+	frames := 0
+	for i := 0; i+4 <= len(data); frames++ {
+		h := data[i : i+4]
+		if h[0] != 0xFF || h[1]&0xE0 != 0xE0 || h[2]>>4 == 0 || h[2]>>4 >= 15 || (h[2]>>2)&3 == 3 {
+			t.Fatalf("frame %d at byte %d has a bad header: % x", frames, i, h)
+		}
+		size := 144*bitrates[h[2]>>4]*1000/rates[(h[2]>>2)&3] + int((h[2]>>1)&1)
+		i += size
+	}
+	wantFrames := len(samples)/1152 + 3
+	if frames != wantFrames {
+		t.Fatalf("got %d frames, want %d", frames, wantFrames)
 	}
 }
